@@ -2,28 +2,10 @@ bPauseAttributeRefresh = True
 if not (IsOldCompleted) then
 SetEventAttributeNumeric("CURRENT EVENT NO",LookupCurrentEventNum)
 end if
-'EQUIPMENT NOTES CONTROL------------------------------------------------------
- SetProjectResult("SET")
-LaunchScriptProject("EQUIPMENT NOTES CONTROL")
-sFooterText = ReturnFromSQL(Format("SELECT ATTRIBUTE_AS_MEMO
-FROM EVENTATTRIBUTES a
-INNER JOIN VENDOR v ON v.COMPANY = '%0:s' AND v.VENDOR_NAME = '%1:s'
-WHERE a.EVENT_NUM = '%2:d' AND a.ATTRIBUTE_NAME = 'FOOTERTEXT'",
-[GetDefaultCompany("VENDOR"), LookupEquipmentFieldText("CURRENT_VENDOR"), LookupCurrentEventNum]))
-'/EQUIPMENT NOTES CONTROL------------------------------------------------------
-'SET SHIPPING COND------------------------------------------------------------
- LaunchScriptProject("YSET SHIPPING CONDITION")
-'/SET SHIPPING COND------------------------------------------------------------                           
-'UPDATE COSTCENTER------------------------------------------------------------
-LaunchScriptProject("YUPDATE COSTCENTER")
-'/UPDATE COSTCENTER------------------------------------------------------------
-'UPDATE HOME VIEW-------------------------------------------------------------
-bAtVendor = LookupEquipmentFieldBoolean("LAB_STATUS5")
 'CHECK PO----------------------------------------------------------------------
 sEventNum = LookupCurrentEventNum
 sSendToWs = ReturnFromSQL("SELECT ATTRIBUTE_AS_CHAR FROM EVENTATTRIBUTES WHERE EVENT_NUM = "& sEventNum &" AND COMPANY = '"& LookupEquipmentCompany &"' AND GAGE_SN = '"& LookupEquipmentID &"' AND ATTRIBUTE_NAME = 'SEND TO WS'")
 sCompany = LookupEquipmentCompany
-sGagesn = LookupEquipmentID
 
     if sSendToWs = "0" then
         'ShowMessage(LookupCurrentEventNum)
@@ -31,106 +13,45 @@ sGagesn = LookupEquipmentID
         'ShowMessage(sShipTo)                                                               
         SetEquipmentFieldText("CUSTOMTEXT6", sShipTo)
     end if
-    'This script changes equipment status
-    bAtVendor = LookupEquipmentFieldBoolean("LAB_STATUS5")
-    'sGuid = LookupEventAttributeText("GUID")
 
+'This script changes equipment status (done by Lily 24/10) -----------------------------------------
     sGuid = ReturnFromSQL("SELECT WO_CUSTOM9 FROM WORK_ORDER WHERE JOB_NUMBER ='" & LookupEquipmentFieldText("CURRENT_WO_NUMBER")& "'")
-    sTransitVendor = ReturnFromSQL("select TRANSIT_VENDOR from GAGES WITH (NOLOCK)  where GAGE_SN = '"& LookupEquipmentID &"'")
-    sSuccessStatus = "APA"   'awaiting parts
-    sActualService = LookupEquipmentFieldText("TRANSIT_CUSTOM_FIELD3")
-    if (bAtVendor) then
-        sSuccessStatus = "AVP"                             'Await Vendor PO
-    else
-
-        SELECT CASE sActualService
-            CASE "SCRAPPED"
-                sSuccessStatus = "SRP"                     ' SCRAPPED
-            CASE "RETURN UNREPAIRED"
-                sSuccessStatus = "RUR"                     'return unrepaired
-            CASE "CALIBRATION ONLY"
-                if sTransitVendor = "ACCSW PLA" then
-                    if (LookupEquipmentFieldText("STATUS10") = "1") then
-                    'SetEquipmentFieldText("EVENT_STATUS", "HOLD")
-                    sSuccessStatus = "HOLD"
-                    else sSuccessStatus = "APA"            'awaiting parts
-                    end if
-                else sSuccessStatus = "APA"                'awaiting parts
-                end if
-            CASE ELSE
-                sSuccessStatus = "APA"                     'awaiting parts
-        END SELECT
-    end if 
-'checking if there are some parts
-bSendToWS = LookupEquipmentFieldBoolean("STATUS9")
-if not bSendToWS then
-    SetEquipmentFieldText("CUSTOMTEXT6", LookupEquipmentAttributeText("SHIP TO"))
-end if
+    'sTransitVendor = ReturnFromSQL("select TRANSIT_VENDOR from GAGES WITH (NOLOCK)  where GAGE_SN = '"& LookupEquipmentID &"'")
+    'sSuccessStatus = "APA"   'awaiting parts
+    'sActualService = LookupEquipmentFieldText("TRANSIT_CUSTOM_FIELD3")
+'ShowMessage(ReplaceSpecialFields("!WORKSTATION_DEPARTMENT!"))
+bIsWS =  (InStr( ReplaceSpecialFields("!WORKSTATION_DEPARTMENT!")," WS") > 0)
+bIsFS =  (InStr( ReplaceSpecialFields("!WORKSTATION_DEPARTMENT!"), " FS") > 0)
+bIsTMC = (InStr( ReplaceSpecialFields("!WORKSTATION_DEPARTMENT!"), " WO") > 0)
+bIfPartsEvent = ((ReturnFromSQL("SELECT COUNT (*) FROM REPAIRPARTSEVENTS WHERE EVENT_NUM = "& LookupCurrentEventNum &" AND LINE_TYPE = 0")) > 0)
+bGenerateRecParts = False
 sCurrentEquip = LookupEquipmentID
-sFirstEquip = ReturnFromSQL("SELECT TOP 1 GAGE_SN FROM REPAIRPARTSEVENTS WHERE EVENT_NUM =" & LookupCurrentEventNum)
+sFirstEquip = ReturnFromSQL("SELECT TOP 1 GAGE_SN FROM REPAIRPARTSEVENTS WHERE EVENT_NUM =" & sEventNum)
+sFirstEquipStatus = ReturnFromSQL("SELECT EVENT_STATUS FROM GAGES WHERE GAGE_SN ='" & sFirstEquip & "' AND COMPANY = '" & LookupEquipmentCompany & "'")
+rIsEmPo = ReturnFromSQL("SELECT ATTRIBUTE_AS_CHAR FROM WORK_ORDER_ATTRIBUTES WHERE JOB_NUMBER = '"& LookupEquipmentFieldText("CURRENT_WO_NUMBER") &"' AND ATTRIBUTE_NAME = 'EMERGENCY PO'")
+bIfSuccessSAP = True
+'ShowMessage ("  sCurrentEquip  " &sCurrentEquip&"  sFirstEquip  "&  sFirstEquip  &"   rIsEmPo   "&rIsEmPo)
+'ShowMessage(((sCurrentEquip = sFirstEquip) and ((rIsEmPo = "0") or (rIsEmPo = ""))))
+'ShowMessage("sCurrentEquip " & sCurrentEquip & " sFirstEquip " & sFirstEquip & " rIsEmPo " & rIsEmPo)
+if ((sCurrentEquip = sFirstEquip) and ((rIsEmPo = "0") or (rIsEmPo = ""))) then
+    'ShowMessage(LookupEventFieldText("CUSTOM_FIELD1"))
 
-SetEquipmentFieldNumeric("GAGE_COST", LookupEventFieldNumeric("COST"))
-sContainsWS =  InStr( ReplaceSpecialFields("!WORKSTATION_DEPARTMENT!"),"WS")
-sContainsFS =  InStr( ReplaceSpecialFields("!WORKSTATION_DEPARTMENT!"), "FS")
-If((ReturnFromSQL("SELECT  COUNT(*) FROM REPAIRPARTSEVENTS WHERE EVENT_NUM ='"& sEventNum &"' AND LINE_TYPE =0")=0) and  (sSuccessStatus = "APA")    )    then
-       if (sContainsWS>"0")  then
-             sSuccessStatus= "ARP"
-    sLastQuote = ReturnFromSQL("SELECT TOP 1 EVENT_NUM FROM EVENTS WITH (NOLOCK) WHERE COMPANY = '" & LookupEquipmentCompany & "' AND GAGE_SN = '" &
-        LookupEquipmentID & "' AND EVENT_TYPE = 'UQUOTE REVIEW' ORDER BY EVENT_NUM DESC")
-                if sLastQuote <> "" then
-        sLastReceiveParts = ReturnFromSQL("SELECT TOP 1 EVENT_NUM FROM EVENTS WITH (NOLOCK) WHERE EVENT_NUM > " & sLastQuote & " AND COMPANY = '" & LookupEquipmentCompany & "' AND GAGE_SN = '" &
-            LookupEquipmentID & "' AND EVENT_TYPE = 'URECEIVE PARTS' ORDER BY EVENT_NUM DESC")
-                    if sLastReceiveParts = "" then
-            sNewInt = LookupNewEventNum
-            sRandom = Random
-            RunSQL("INSERT INTO EVENTS (EVENT_NUM, OUTEQUIP_NUM, COMPANY, GAGE_SN, EVENT_TYPE, EVENT_DATE, EVENT_TIME, USER_FNAME, " &
-                    "DONE_BY_FNAME, PO_NUMBER, CUSTOM_FIELD1, CUSTOM_FIELD2, MACHINE, EVENT_STATUS, EVENT_COMMENT, VENDOR) VALUES " &
-                    "(" & sNewInt & ", " & sNewInt & ", '" & LookupEquipmentCompany & "', '" & LookupEquipmentID & "', 'URECEIVE PARTS', '" &
-                    FormatDateTimeForSQL(Date) & "', '" & FormatDateTimeForSQL(Time) & "', '" & LookupCurrentUser & "', '" &
-                    LookupCurrentUserEmployeeInfo("EMP_ID") & "',  '" & LookupEquipmentFieldText("LAB_CUSTOM3") & "', '" & sRandom & "', '" & LookupEquipmentFieldText("LAB_CUSTOM2") &
-                    "',  '" & LookupEquipmentFieldText("LAB_CUSTOM4") & "', " &
-                    "'COMPLETE', 'No parts required - this was was auto-created upon completion of ORDER', '" & LookupEquipmentFieldText("CURRENT_VENDOR") & "')")
-             RunSQL("INSERT INTO EVENTEQUIP (OUTEQUIP_NUM, COMPANY, EQUIP_NUMBER, CRIB_NUMBER, BIN_NUMBER, IS_GAGE) VALUES " &
-                    "(" & sNewInt & ", '" & LookupEquipmentCompany & "', '" & LookupEquipmentID & "', 'N/A', 'N/A', '1')")
-
-                    End if
-                end if
-            'end if
-         elseif  (sContainsFS > 0) then
-         sSuccessStatus= "APS"
-         end if
-end if
-    sCurrentEquip = LookupEquipmentID
-    sFirstEquip = ReturnFromSQL("SELECT TOP 1 GAGE_SN FROM REPAIRPARTSEVENTS WHERE EVENT_NUM =" & sEventNum)
-    sFirstEquipStatus = ReturnFromSQL("SELECT EVENT_STATUS FROM GAGES WHERE GAGE_SN ='" & sFirstEquip & "' AND COMPANY = '" & LookupEquipmentCompany & "'")
-    if sCurrentEquip = sFirstEquip then
-        if LookupEventFieldText("CUSTOM_FIELD1") <> "YES" then
-            sPO = LookupEventAttributeText("PO NUMBER")
-            sAnswer = MsgBox("Message to SAP wasn't sent.
-    Press 'Yes' to send message.
-    Press 'No' to proceed without sending message.
-    Press 'Cancel' to stay on event and send manually.", 35)
-            SELECT CASE sAnswer
+    if LookupEventFieldText("CUSTOM_FIELD1") <> "YES" then
+        sPO = LookupEventAttributeText("PO NUMBER")
+        sAnswer = MsgBox("Message to SAP wasn't sent.
+            Press 'Yes' to send message.
+            Press 'No' to proceed without sending message.
+            Press 'Cancel' to stay on event and send manually.", 35)
+        SELECT CASE sAnswer
             CASE "6"
                 if (sPO = "") or (sPO = "WAITING PO") or (len(sPO)>35) then
                     AbortAction("PO Number invalid. Required, max length 35 char")
+                    bIfSuccessSAP = False
                 else
                     if (sGuid<> "") then
-                    sLabCustom5 = ReturnFromSQL("select lab_custom5 from gages  where gage_sn = '"& sGagesn &"'")
-                            if ( (sLabCustom5 = "REQUOTE") or (sLabCustom5 = "REWORK") ) then
-                             ShowMessage("Tool is on "& sLabCustom5 & " and you have performed z2 so Z4 will be run")
-                                    SetEventAttributeText("METHOD", "Z4")
-                                    sMethod = "Z4_PartConsumeAndConfirmation"
-                                    'SetEventFieldText("CUSTOM_FIELD1", "YES")
-                                    SetProjectResult(sMethod)
-                              
-                            else
-                               ShowMessage("Z3 order update will be launched because you have GUID")
-                               SetEventAttributeText("METHOD","Z3")
-                               sMethod = "Z3_UnplannedWorkToOrder"
-                            end if
+                       SetEventAttributeText("METHOD","Z3")
+                       sMethod = "Z3_UnplannedWorkToOrder"
                     else
-                       ShowMessage("Z2 order create will be launched because you do not have GUID")
                        SetEventAttributeText("METHOD","Z2")
                        sMethod = "Z2_OrderCreate"
                     end if
@@ -141,44 +62,80 @@ end if
                         RunSQL("DELETE FROM [REPAIRPARTSEVENTS_EXT] WHERE EVENT_NUM = " & sEventNum)
                     end if
                     LaunchScriptProject("ZXML TEST MULTY")
-                    'sGuid = LookupEventAttributeText("GUID")
-                    'sGuid = LookupWOFieldText("WO_CUSTOM9")
                     sGuid = ReturnFromSQL("SELECT WO_CUSTOM9 FROM WORK_ORDER WHERE JOB_NUMBER ='" & LookupEquipmentFieldText("CURRENT_WO_NUMBER")& "'")
-                    if LookupEventAttributeText("METHOD") <> "Z4" then
-                        if sGuid <> "" then
-                            SetEquipmentFieldText("EVENT_STATUS", sSuccessStatus)
-                        else
-                            AbortAction("GUID number wasn't received.")
-                        end if
+                    if sGuid <> "" then
+                        bIfSuccessSAP = True
                     else
-                        sGuid = LookupEventAttributeText("GUID")
-                         if sGuid <> "" then
-                             SetEquipmentFieldText("EVENT_STATUS", "AIN")
-                         else
-                             AbortAction("Guid wasn't received")
-                         end if                                     
+                        AbortAction("GUID number wasn't received.")
+                        bIfSuccessSAP = False
                     end if
                  end if
              CASE "7"
                 if (sPO = "") or (sPO = "WAITING PO") or (len(sPO)>35) then
                     AbortAction("PO Number invalid. Required, max length 35 char")
+                    bIfSuccessSAP = False
                 end if
-                    SetEquipmentFieldText("EVENT_STATUS", sSuccessStatus)
+                bIfSuccessSAP = True
              CASE ELSE
                 AbortAction("")
-             END SELECT
-        elseif (sGuid <> "") then
-             SetEquipmentFieldText("EVENT_STATUS", sSuccessStatus)
-        end if
-    elseif (sGuid <> "")
-        or (sFirstEquipStatus = "AVP")                            'Await Vendor PO
-        or (sFirstEquipStatus = "SRP")                            'Scrapped
-        or (sFirstEquipStatus = "RUR")                            'return unrepaired
-        or (sFirstEquipStatus = "APA") then                       'awaiting parts
-        SetEquipmentFieldText("EVENT_STATUS", sSuccessStatus)
+                bIfSuccessSAP = False
+        END SELECT
+    elseif (sGuid <> "") then
+        bIfSuccessSAP = True
     end if
+elseif (sGuid <> "") then
+    bIfSuccessSAP = True
+end if
+sStatus = ""
+if (bIfSuccessSAP = True) then
+        if bIsWS then
+            if (LookupEventAttributeBoolean("SEND TO VENDOR") = "1") then
+                sStatus = "AVR"   
+            elseif (bIfPartsEvent) then
+                sStatus = "APA"
+            else
+            sStatus = "ARP" 'Awaiting Repair
+            bGenerateRecParts = True
+            end if
+        elseif bIsFS then
+            if (bIfPartsEvent) then
+                sStatus = "APA"
+            else
+                sStatus = "ATA" 'Await Tech Ass.
+                bGenerateRecParts = True
+            end if
+        elseif bIsTMC then
+            if (bIfPartsEvent) then
+                sStatus = "APA"
+            else
+            sStatus = "ARO" 'Awaiting Rep OnSite
+            bGenerateRecParts = True
+            end if
+        end if
+
+    SetEquipmentFieldText("EVENT_STATUS", sStatus)
+end if
+if (bGenerateRecParts) then
+'Event Generation--------------------------
+                        sNewInt = LookupNewEventNum
+                        sRandom = Random
+                        RunSQL("INSERT INTO EVENTS (EVENT_NUM, OUTEQUIP_NUM, COMPANY, GAGE_SN, EVENT_TYPE, EVENT_DATE, EVENT_TIME, USER_FNAME, " &
+                            "DONE_BY_FNAME, PO_NUMBER, CUSTOM_FIELD1, CUSTOM_FIELD2, MACHINE, EVENT_STATUS, EVENT_COMMENT, VENDOR) VALUES " &
+                            "(" & sNewInt & ", " & sNewInt & ", '" & LookupEquipmentCompany & "', '" & LookupEquipmentID & "', 'URECEIVE PARTS', '" &
+                            FormatDateTimeForSQL(Date) & "', '" & FormatDateTimeForSQL(Time) & "', '" & LookupCurrentUser & "', '" &
+                            LookupCurrentUserEmployeeInfo("EMP_ID") & "',  '" & LookupEquipmentFieldText("LAB_CUSTOM3") & "', '" & sRandom & "', '" & LookupEquipmentFieldText("LAB_CUSTOM2") &
+                            "',  '" & LookupEquipmentFieldText("LAB_CUSTOM4") & "', " &
+                            "'COMPLETE', 'No parts required - this was was auto-created upon completion of ORDER', '" & LookupEquipmentFieldText("CURRENT_VENDOR") & "')")
+                         RunSQL("INSERT INTO EVENTEQUIP (OUTEQUIP_NUM, COMPANY, EQUIP_NUMBER, CRIB_NUMBER, BIN_NUMBER, IS_GAGE) VALUES " &
+                            "(" & sNewInt & ", '" & LookupEquipmentCompany & "', '" & LookupEquipmentID & "', 'N/A', 'N/A', '1')")
+'---------------------------------------------------------------------------------
+end if
+
 
 '/CHECK PO----------------------------------------------------------------------
+
+
+
 
 LaunchScriptProject("YORDER FINISH")
 LaunchScriptProject("YSET SHIPPING CONDITION")
@@ -194,15 +151,11 @@ SetEquipmentFieldDate("CURRENT_RETURN_DATE",LookupEventFieldNumeric("RETURN_DATE
 SetEquipmentFieldNumeric("GAGE_COST", LookupEventFieldNumeric("COST"))
 '/UPDATE HOMEVIEW-----------------------------------------------------------------
 sPO = LookupEventAttributeText("PO NUMBER")
-if (LookupCurrentUser = "TDEEXTLMK") then
-ShowMessage(sPo)
+if ((sPO <> "") and (sPO <> "WAITING PO") and (len(sPO)<35)) then
+    if (LookupEventAttributeBoolean("DECREMENTED PO") = 0) then
+        LaunchScriptProject("DECREMENT PO")
+    end if
 end if
-if (sPO <> "") and (sPO <> "WAITING PO") and (len(sPO)<35) then
-if (LookupEventAttributeBoolean("DECREMENTED PO") = 0) then
-LaunchScriptProject("DECREMENT PO")
-end if
-end if
-SetEquipmentFieldNumeric("GAGE_COST", LookupEventFieldNumeric("COST"))
 LaunchScriptProject("RUN RULES")
 SetEventAttributeText("CURR_EVNUM",sEventNum)   
 bPauseAttributeRefresh = False
